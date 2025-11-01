@@ -1,32 +1,89 @@
 package com.example.juego.ui.screens
 
+import android.util.Log
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.juego.R
 import com.example.juego.model.Card
 import com.example.juego.model.Suit
+import com.example.juego.ui.utils.SoundManager
+import com.example.juego.viewmodel.GameResult
+import com.example.juego.viewmodel.GameState
 import com.example.juego.viewmodel.GameStatus
 import com.example.juego.viewmodel.GameViewModel
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.window.Dialog
+import androidx.compose.material3.Card
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
 
-// Color de la mesa
 val tableColor = Color(0xFF006400) // Verde oscuro
 
 @Composable
-fun GameScreen(viewModel: GameViewModel) {
+fun GameScreen(
+    viewModel: GameViewModel,
+    isTwoPlayer: Boolean, // ¡NUEVO!
+    onNavigateBack: () -> Unit // ¡NUEVO!
+) {
+    var showSaveDialog by remember { mutableStateOf(false) }
+    // 1. Inicia el juego con el modo correcto
+    LaunchedEffect(key1 = isTwoPlayer) {
+        Log.d("GameScreen", "Iniciando juego, es 2 jugadores: $isTwoPlayer")
+        viewModel.initGame(isTwoPlayer)
+    }
+
     val state by viewModel.gameState.collectAsState()
-    val isPlayerTurn = state.gameStatus == GameStatus.PLAYER_TURN
+    val context = LocalContext.current
+    val soundManager = remember { SoundManager(context) }
+
+    // El oyente de sonido sigue igual
+    LaunchedEffect(key1 = soundManager) {
+        soundManager.loadSound(R.raw.card_deal)
+        soundManager.loadSound(R.raw.win)
+        soundManager.loadSound(R.raw.bust)
+        viewModel.soundEffect.collect { soundResourceId ->
+            soundManager.playSound(soundResourceId)
+        }
+    }
+    DisposableEffect(key1 = soundManager) { onDispose { soundManager.release() } }
+    if (showSaveDialog) {
+        SaveGameDialog(
+            onDismiss = { showSaveDialog = false },
+            onSave = { filename ->
+                viewModel.saveGame(filename)
+                showSaveDialog = false
+            }
+        )
+    }
 
     Column(
         modifier = Modifier
@@ -34,7 +91,7 @@ fun GameScreen(viewModel: GameViewModel) {
             .background(tableColor)
             .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.SpaceAround
+        verticalArrangement = Arrangement.SpaceBetween
     ) {
         // --- MANO DEL DEALER ---
         HandView(
@@ -42,26 +99,87 @@ fun GameScreen(viewModel: GameViewModel) {
             cards = state.dealerHand,
             score = state.dealerScore,
             isDealerHand = true,
-            isPlayerTurn = isPlayerTurn
+            gameStatus = state.gameStatus
         )
 
-        // --- MENSAJE DE ESTADO ---
-        GameStatusMessage(status = state.gameStatus)
+        // --- MENSAJE DE ESTADO DEL JUEGO ---
+        GameStatusMessage(state = state)
 
-        // --- MANO DEL JUGADOR ---
-        HandView(
-            title = "Jugador",
-            cards = state.playerHand,
-            score = state.playerScore
-        )
+        // --- MANOS DE JUGADORES ---
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // --- JUGADOR 2 (si existe) ---
+            if (state.isTwoPlayerMode) {
+                HandView(
+                    title = "Jugador 2",
+                    cards = state.player2Hand,
+                    score = state.player2Score,
+                    isActive = state.gameStatus == GameStatus.PLAYER_2_TURN,
+                    result = state.player2Result
+                )
+            }
+
+            // --- JUGADOR 1 (siempre) ---
+            HandView(
+                title = "Jugador 1",
+                cards = state.player1Hand,
+                score = state.player1Score,
+                isActive = state.gameStatus == GameStatus.PLAYER_1_TURN,
+                result = state.player1Result
+            )
+        }
 
         // --- BOTONES DE CONTROL ---
         ControlButtons(
             status = state.gameStatus,
             onHit = { viewModel.onPlayerHit() },
             onStand = { viewModel.onPlayerStand() },
-            onNewGame = { viewModel.startNewGame() }
+            onNewGame = { viewModel.startNewGame() },
+            onGoToMenu = onNavigateBack, // ¡NUEVO!
+            onSaveGame = { showSaveDialog = true }
         )
+    }
+}
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SaveGameDialog(
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit
+) {
+    var text by remember { mutableStateOf("partida1") }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = Modifier.padding(16.dp),
+            shape = MaterialTheme.shapes.medium,
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(text = "Guardar Partida", style = MaterialTheme.typography.titleLarge)
+                Spacer(modifier = Modifier.height(16.dp))
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    label = { Text("Nombre del archivo") }
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Cancelar")
+                    }
+                    TextButton(
+                        onClick = { onSave(text) },
+                        enabled = text.isNotBlank()
+                    ) {
+                        Text("Guardar")
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -71,36 +189,114 @@ fun HandView(
     cards: List<Card>,
     score: Int,
     isDealerHand: Boolean = false,
-    isPlayerTurn: Boolean = false
+    gameStatus: GameStatus? = null, // Solo para el dealer
+    isActive: Boolean = false, // Para P1 y P2
+    result: GameResult? = null // Para P1 y P2
 ) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    // Borde brillante si es el turno del jugador
+    val activeBorder = if (isActive) Modifier.border(2.dp, Color.Yellow, MaterialTheme.shapes.medium) else Modifier
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = activeBorder.padding(4.dp)
+    ) {
+
+        var titleText = "$title: $score"
+        var titleColor = Color.White
+
+        // Muestra el resultado final del jugador
+        result?.let {
+            when(it) {
+                GameResult.WIN -> { titleText = "$title: ¡GANA!"; titleColor = Color.Green }
+                GameResult.LOSS -> { titleText = "$title: PIERDE"; titleColor = Color.Red }
+                GameResult.BUST -> { titleText = "$title: BUST ($score)"; titleColor = Color.Red }
+                GameResult.PUSH -> { titleText = "$title: EMPATE"; titleColor = Color.Yellow }
+                GameResult.PENDING -> {} // No hacer nada
+            }
+        }
+
         Text(
-            text = "$title: $score",
+            text = titleText,
             fontSize = 20.sp,
             fontWeight = FontWeight.Bold,
-            color = Color.White
+            color = titleColor
         )
         Spacer(modifier = Modifier.height(8.dp))
         Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.height(100.dp) // Altura fija para la mano
         ) {
-            // La primera carta del dealer está oculta durante el turno del jugador
-            if (isDealerHand && isPlayerTurn && cards.isNotEmpty()) {
+            val isDealerTurn = gameStatus == GameStatus.DEALER_TURN || gameStatus == GameStatus.GAME_OVER
+
+            if (isDealerHand && !isDealerTurn && cards.isNotEmpty()) {
+                // Dealer con carta oculta
                 CardView(card = cards[0], isHidden = true)
-                // Muestra el resto de las cartas (solo la segunda al inicio)
-                cards.drop(1).forEach { card ->
-                    CardView(card = card)
-                }
+                cards.drop(1).forEach { card -> CardView(card = card) }
             } else {
-                // Muestra todas las cartas normalmente
+                // Muestra todas las cartas
                 cards.forEach { card ->
-                    CardView(card = card)
+                    AnimatedVisibility(
+                        visible = true,
+                        enter = fadeIn() + slideInHorizontally(animationSpec = spring(stiffness = Spring.StiffnessMedium)),
+                        exit = fadeOut() + slideOutHorizontally()
+                    ) {
+                        CardView(card = card)
+                    }
                 }
             }
         }
     }
 }
 
+@Composable
+fun GameStatusMessage(state: GameState) {
+    val message = when (state.gameStatus) {
+        GameStatus.PLAYER_1_TURN -> "Turno del Jugador 1"
+        GameStatus.PLAYER_2_TURN -> "Turno del Jugador 2"
+        GameStatus.DEALER_TURN -> "Turno del Dealer..."
+        GameStatus.GAME_OVER -> "¡Juego Terminado!"
+    }
+
+    Text(
+        text = message,
+        fontSize = 24.sp,
+        fontWeight = FontWeight.Bold,
+        color = Color.Yellow,
+        modifier = Modifier.padding(16.dp)
+    )
+}
+
+@Composable
+fun ControlButtons(
+    status: GameStatus,
+    onHit: () -> Unit,
+    onStand: () -> Unit,
+    onNewGame: () -> Unit,
+    onGoToMenu: () -> Unit,
+    onSaveGame: () -> Unit
+) {
+    val isGameInProgress = status == GameStatus.PLAYER_1_TURN || status == GameStatus.PLAYER_2_TURN
+
+    if (isGameInProgress) {
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Button(onClick = onHit, enabled = isGameInProgress) { Text("Pedir") }
+            Button(onClick = onStand, enabled = isGameInProgress) { Text("Plantarse") }
+        }
+        Spacer(modifier = Modifier.height(16.dp))
+        // --- NUEVO BOTÓN DE GUARDAR ---
+        Button(onClick = onSaveGame, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)) {
+            Text("Guardar Partida")
+        }
+    } else {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Button(onClick = onNewGame) { Text("Jugar de Nuevo") }
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(onClick = onGoToMenu) { Text("Volver al Menú") }
+        }
+    }
+}
+
+// CardView no necesita cambios
 @Composable
 fun CardView(card: Card, isHidden: Boolean = false) {
     val cardColor = if (card.suit == Suit.DIAMONDS || card.suit == Suit.HEARTS) Color.Red else Color.Black
@@ -120,51 +316,5 @@ fun CardView(card: Card, isHidden: Boolean = false) {
             fontSize = 24.sp,
             fontWeight = FontWeight.Bold
         )
-    }
-}
-
-@Composable
-fun GameStatusMessage(status: GameStatus) {
-    val message = when (status) {
-        GameStatus.PLAYER_TURN -> "Tu turno"
-        GameStatus.DEALER_TURN -> "Turno del Dealer..."
-        GameStatus.PLAYER_WINS -> "¡Ganaste!"
-        GameStatus.DEALER_WINS -> "Gana el Dealer"
-        GameStatus.PLAYER_BUSTS -> "¡Te pasaste! Gana el Dealer"
-        GameStatus.DEALER_BUSTS -> "¡Dealer se pasó! ¡Ganaste!"
-        GameStatus.PUSH -> "Empate"
-    }
-
-    Text(
-        text = message,
-        fontSize = 24.sp,
-        fontWeight = FontWeight.Bold,
-        color = Color.Yellow,
-        modifier = Modifier.padding(16.dp)
-    )
-}
-
-@Composable
-fun ControlButtons(
-    status: GameStatus,
-    onHit: () -> Unit,
-    onStand: () -> Unit,
-    onNewGame: () -> Unit
-) {
-    val isGameInProgress = status == GameStatus.PLAYER_TURN
-
-    if (isGameInProgress) {
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            Button(onClick = onHit, enabled = isGameInProgress) {
-                Text("Pedir")
-            }
-            Button(onClick = onStand, enabled = isGameInProgress) {
-                Text("Plantarse")
-            }
-        }
-    } else {
-        Button(onClick = onNewGame) {
-            Text("Jugar de Nuevo")
-        }
     }
 }

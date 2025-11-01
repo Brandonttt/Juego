@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 android {
@@ -40,7 +41,15 @@ android {
 }
 
 dependencies {
+    // Para JSON
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
 
+    // Para Guardar Preferencias (DataStore)
+    implementation("androidx.datastore:datastore-preferences:1.1.1")
+
+    // Para XML (hace la vida más fácil)
+    implementation("net.sf.kxml:kxml2:2.3.0")
+    implementation("androidx.navigation:navigation-compose:2.7.7")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
@@ -56,4 +65,5 @@ dependencies {
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
+
 }

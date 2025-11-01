@@ -1,70 +1,248 @@
 package com.example.juego.viewmodel
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import android.util.Log
+import androidx.lifecycle.AndroidViewModel // <-- CAMBIO IMPORTANTE
 import androidx.lifecycle.viewModelScope
+import com.example.juego.R
 import com.example.juego.model.Card
 import com.example.juego.model.Deck
+import com.example.juego.ui.utils.SaveFormat
+import com.example.juego.ui.utils.SaveLoadManager // <-- NUEVO
+import com.example.juego.ui.utils.SettingsManager // <-- NUEVO
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-class GameViewModel : ViewModel() {
+class GameViewModel(application: Application) : AndroidViewModel(application) { // <-- CAMBIO
 
     private val _gameState = MutableStateFlow(GameState())
     val gameState = _gameState.asStateFlow()
 
+    private val _soundEffect = Channel<Int>(Channel.BUFFERED)
+    val soundEffect = _soundEffect.receiveAsFlow()
+
     private val deck = Deck()
-    private lateinit var internalDealerHand: MutableList<Card> // Mano real del dealer
-    private lateinit var internalPlayerHand: MutableList<Card> // Mano real del jugador
+    private lateinit var internalPlayer1Hand: MutableList<Card>
+    private lateinit var internalPlayer2Hand: MutableList<Card>
+    private lateinit var internalDealerHand: MutableList<Card>
+
+    // --- NUEVA LÓGICA DE GUARDADO Y TIEMPO ---
+    private val settingsManager = SettingsManager(application)
+    private val saveLoadManager = SaveLoadManager(application)
+    private var timerJob: Job? = null
+
+    // Expone el flujo de preferencias a la UI (para la pantalla de Opciones)
+    val preferredFormatFlow = settingsManager.preferredFormatFlow
+
+    // --- FIN DE NUEVA LÓGICA ---
+
+    private var isTwoPlayerMode = false
 
     init {
+        // Al iniciar, no iniciamos el juego, esperamos a la UI
+    }
+
+    fun initGame(isTwoPlayer: Boolean) {
+        isTwoPlayerMode = isTwoPlayer
         startNewGame()
     }
 
-    fun startNewGame() {
-        deck.shuffle()
-        internalPlayerHand = deck.drawHand()
-        internalDealerHand = deck.drawHand()
-
-        _gameState.value = GameState(
-            playerHand = internalPlayerHand,
-            dealerHand = internalDealerHand, // Al inicio mostramos ambas
-            playerScore = calculateHandValue(internalPlayerHand),
-            dealerScore = internalDealerHand[1].rank.value, // Puntuación de la CARTA VISIBLE
-            gameStatus = GameStatus.PLAYER_TURN
-        )
+    private fun playSound(soundId: Int) {
+        viewModelScope.launch {
+            _soundEffect.send(soundId)
+        }
     }
 
-    fun onPlayerHit() {
-        if (_gameState.value.gameStatus != GameStatus.PLAYER_TURN) return
+    fun startNewGame() {
+        // Cancela el timer anterior si existe
+        timerJob?.cancel()
 
-        internalPlayerHand.add(deck.drawCard())
-        val newScore = calculateHandValue(internalPlayerHand)
+        deck.shuffle()
+        internalPlayer1Hand = deck.drawHand()
+        internalDealerHand = deck.drawHand()
 
-        _gameState.update {
-            it.copy(
-                playerHand = internalPlayerHand,
-                playerScore = newScore
+        var initialState = GameState(
+            isTwoPlayerMode = isTwoPlayerMode,
+            player1Hand = internalPlayer1Hand,
+            player1Score = calculateHandValue(internalPlayer1Hand),
+            dealerHand = internalDealerHand,
+            dealerScore = internalDealerHand[1].rank.value,
+            gameStatus = GameStatus.PLAYER_1_TURN,
+            player1Result = GameResult.PENDING,
+            timeElapsed = 0, // Resetea el tiempo
+            moveHistory = listOf("NUEVA_PARTIDA") // Resetea el historial
+        )
+
+        if (isTwoPlayerMode) {
+            internalPlayer2Hand = deck.drawHand()
+            initialState = initialState.copy(
+                player2Hand = internalPlayer2Hand,
+                player2Score = calculateHandValue(internalPlayer2Hand),
+                player2Result = GameResult.PENDING
             )
         }
 
-        if (newScore > 21) {
-            _gameState.update { it.copy(gameStatus = GameStatus.PLAYER_BUSTS) }
+        _gameState.value = initialState
+        startTimer() // Inicia el nuevo timer
+    }
+
+    private fun startTimer() {
+        timerJob?.cancel() // Asegura que solo haya un timer
+        timerJob = viewModelScope.launch {
+            while (true) {
+                delay(1000)
+                _gameState.update { it.copy(timeElapsed = it.timeElapsed + 1) }
+            }
+        }
+    }
+
+    // --- NUEVAS FUNCIONES DE GUARDAR/CARGAR ---
+
+    fun saveGame(filename: String) {
+        viewModelScope.launch {
+            val format = settingsManager.preferredFormatFlow.first()
+            val stateToSave = _gameState.value
+            val success = saveLoadManager.saveGame(stateToSave, filename, format)
+            if (success) {
+                Log.d("GameViewModel", "Partida guardada $filename.${format.extension}")
+            } else {
+                Log.e("GameViewModel", "Error al guardar la partida")
+            }
+        }
+    }
+
+    fun loadGame(filename: String) {
+        viewModelScope.launch {
+            val loadedState = saveLoadManager.loadGame(filename)
+            if (loadedState != null) {
+                Log.d("GameViewModel", "Partida cargada desde $filename")
+                _gameState.value = loadedState
+
+                // Reinicia las manos internas (importante)
+                isTwoPlayerMode = loadedState.isTwoPlayerMode
+                internalPlayer1Hand = loadedState.player1Hand.toMutableList()
+                internalDealerHand = loadedState.dealerHand.toMutableList()
+                if(isTwoPlayerMode) {
+                    internalPlayer2Hand = loadedState.player2Hand.toMutableList()
+                }
+
+                // Reinicia el timer
+                startTimer()
+            } else {
+                Log.e("GameViewModel", "Error al cargar la partida $filename")
+            }
+        }
+    }
+
+    // Expone la lista de partidas guardadas a la UI
+    fun getSavedGames(): List<String> {
+        return saveLoadManager.getSavedGameFiles()
+    }
+
+    // Expone la función de guardar preferencias
+    fun setPreferredSaveFormat(format: SaveFormat) {
+        viewModelScope.launch {
+            settingsManager.setPreferredFormat(format)
+        }
+    }
+
+    // --- FIN DE NUEVAS FUNCIONES ---
+
+    fun onPlayerHit() {
+        val currentState = _gameState.value
+
+        when (currentState.gameStatus) {
+            GameStatus.PLAYER_1_TURN -> {
+                Log.d("GameViewModel", "¡onPlayerHit() P1!")
+                playSound(R.raw.card_deal)
+                internalPlayer1Hand.add(deck.drawCard())
+                val newScore = calculateHandValue(internalPlayer1Hand)
+
+                _gameState.update { it.copy(
+                    player1Hand = internalPlayer1Hand,
+                    player1Score = newScore,
+                    moveHistory = it.moveHistory + "P1_HIT" // Añade al historial
+                )}
+
+                if (newScore > 21) {
+                    viewModelScope.launch {
+                        Log.d("GameViewModel", "¡P1 SE PASÓ (BUST)!")
+                        playSound(R.raw.bust)
+                        delay(100)
+                        _gameState.update { it.copy(
+                            player1Result = GameResult.BUST,
+                            moveHistory = it.moveHistory + "P1_BUST"
+                        )}
+                        onPlayerStand()
+                    }
+                }
+            }
+            GameStatus.PLAYER_2_TURN -> {
+                Log.d("GameViewModel", "¡onPlayerHit() P2!")
+                playSound(R.raw.card_deal)
+                internalPlayer2Hand.add(deck.drawCard())
+                val newScore = calculateHandValue(internalPlayer2Hand)
+
+                _gameState.update { it.copy(
+                    player2Hand = internalPlayer2Hand,
+                    player2Score = newScore,
+                    moveHistory = it.moveHistory + "P2_HIT"
+                )}
+
+                if (newScore > 21) {
+                    viewModelScope.launch {
+                        Log.d("GameViewModel", "¡P2 SE PASÓ (BUST)!")
+                        playSound(R.raw.bust)
+                        delay(100)
+                        _gameState.update { it.copy(
+                            player2Result = GameResult.BUST,
+                            moveHistory = it.moveHistory + "P2_BUST"
+                        )}
+                        onPlayerStand()
+                    }
+                }
+            }
+            else -> {}
         }
     }
 
     fun onPlayerStand() {
-        if (_gameState.value.gameStatus != GameStatus.PLAYER_TURN) return
+        val currentState = _gameState.value
 
-        // Es el turno del dealer
+        when (currentState.gameStatus) {
+            GameStatus.PLAYER_1_TURN -> {
+                _gameState.update { it.copy(moveHistory = it.moveHistory + "P1_STAND") }
+                if (isTwoPlayerMode && currentState.player2Result == GameResult.PENDING) {
+                    _gameState.update { it.copy(gameStatus = GameStatus.PLAYER_2_TURN) }
+                } else {
+                    startDealerTurn()
+                }
+            }
+            GameStatus.PLAYER_2_TURN -> {
+                _gameState.update { it.copy(moveHistory = it.moveHistory + "P2_STAND") }
+                startDealerTurn()
+            }
+            else -> { }
+        }
+    }
+
+    // ... el resto de funciones (startDealerTurn, runDealerTurn, determineWinner, calculateResult, calculateHandValue)
+    // no necesitan cambios, ya que están completas desde la vez anterior.
+    // Solo me aseguraré de que estén aquí:
+
+    private fun startDealerTurn() {
         _gameState.update { it.copy(
             gameStatus = GameStatus.DEALER_TURN,
-            dealerScore = calculateHandValue(internalDealerHand) // Revela la puntuación real
+            dealerScore = calculateHandValue(internalDealerHand),
+            moveHistory = it.moveHistory + "DEALER_TURN"
         )}
-
-        // Lanza una corrutina para manejar el turno del dealer
         viewModelScope.launch {
             runDealerTurn()
         }
@@ -73,39 +251,76 @@ class GameViewModel : ViewModel() {
     private suspend fun runDealerTurn() {
         var dealerScore = calculateHandValue(internalDealerHand)
 
-        // El dealer pide carta mientras tenga menos de 17
         while (dealerScore < 17) {
-            delay(1000) // Pausa para simular que "piensa"
+            delay(1000)
+            _soundEffect.send(R.raw.card_deal)
             internalDealerHand.add(deck.drawCard())
             dealerScore = calculateHandValue(internalDealerHand)
-
-            _gameState.update {
-                it.copy(
-                    dealerHand = internalDealerHand,
-                    dealerScore = dealerScore
-                )
-            }
+            _gameState.update { it.copy(
+                dealerHand = internalDealerHand,
+                dealerScore = dealerScore,
+                moveHistory = it.moveHistory + "DEALER_HIT"
+            )}
         }
 
-        // Espera un segundo más y determina el ganador
+        _gameState.update { it.copy(moveHistory = it.moveHistory + "DEALER_STAND") }
         delay(1000)
         determineWinner(dealerScore)
     }
 
     private fun determineWinner(dealerScore: Int) {
-        val playerScore = _gameState.value.playerScore
+        val currentState = _gameState.value
+        val dealerBusted = dealerScore > 21
 
-        val finalStatus = when {
-            dealerScore > 21 -> GameStatus.DEALER_BUSTS
-            playerScore > dealerScore -> GameStatus.PLAYER_WINS
-            dealerScore > playerScore -> GameStatus.DEALER_WINS
-            else -> GameStatus.PUSH // Empate
+        val p1Result = calculateResult(
+            currentState.player1Score,
+            currentState.player1Result,
+            dealerScore,
+            dealerBusted
+        )
+
+        var p2Result = currentState.player2Result
+        if (isTwoPlayerMode) {
+            p2Result = calculateResult(
+                currentState.player2Score,
+                currentState.player2Result,
+                dealerScore,
+                dealerBusted
+            )
         }
 
-        _gameState.update { it.copy(gameStatus = finalStatus) }
+        if (p1Result == GameResult.WIN || p2Result == GameResult.WIN) {
+            playSound(R.raw.win)
+        }
+        else if (p1Result == GameResult.LOSS || p2Result == GameResult.LOSS) {
+            playSound(R.raw.bust)
+        }
+
+        _gameState.update { it.copy(
+            player1Result = p1Result,
+            player2Result = p2Result,
+            gameStatus = GameStatus.GAME_OVER,
+            moveHistory = it.moveHistory + "GAME_OVER"
+        )}
+        // Detiene el timer al final del juego
+        timerJob?.cancel()
     }
 
-    // La lógica clave del Blackjack: calcular el valor de la mano
+    private fun calculateResult(
+        playerScore: Int,
+        currentResult: GameResult,
+        dealerScore: Int,
+        dealerBusted: Boolean
+    ): GameResult {
+        if (currentResult == GameResult.BUST) return GameResult.BUST
+        if (dealerBusted) return GameResult.WIN
+        return when {
+            playerScore > dealerScore -> GameResult.WIN
+            playerScore < dealerScore -> GameResult.LOSS
+            else -> GameResult.PUSH
+        }
+    }
+
     private fun calculateHandValue(hand: List<Card>): Int {
         var total = 0
         var aces = 0
@@ -115,7 +330,6 @@ class GameViewModel : ViewModel() {
                 aces++
             }
         }
-        // Maneja los Ases: si el total es > 21, un As pasa a valer 1
         while (total > 21 && aces > 0) {
             total -= 10
             aces--
