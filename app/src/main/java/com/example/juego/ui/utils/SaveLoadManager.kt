@@ -96,6 +96,9 @@ class SaveLoadManager(private val context: Context) {
             append("isTwoPlayerMode=${state.isTwoPlayerMode}\n")
             append("gameStatus=${state.gameStatus.name}\n")
             append("timeElapsed=${state.timeElapsed}\n")
+            append("player1Score=${state.player1Score}\n")
+            append("player2Score=${state.player2Score}\n")
+            append("dealerScore=${state.dealerScore}\n")
             append("player1Hand=${serializeHand(state.player1Hand)}\n")
             append("player2Hand=${serializeHand(state.player2Hand)}\n")
             append("dealerHand=${serializeHand(state.dealerHand)}\n")
@@ -113,6 +116,11 @@ class SaveLoadManager(private val context: Context) {
             isTwoPlayerMode = map["isTwoPlayerMode"]?.toBoolean() ?: false,
             gameStatus = GameStatus.valueOf(map["gameStatus"] ?: "PLAYER_1_TURN"),
             timeElapsed = map["timeElapsed"]?.toLong() ?: 0L,
+            // --- AÑADIDO ---
+            player1Score = map["player1Score"]?.toInt() ?: 0,
+            player2Score = map["player2Score"]?.toInt() ?: 0,
+            dealerScore = map["dealerScore"]?.toInt() ?: 0,
+            // --------------
             player1Hand = deserializeHand(map["player1Hand"] ?: ""),
             player2Hand = deserializeHand(map["player2Hand"] ?: ""),
             dealerHand = deserializeHand(map["dealerHand"] ?: ""),
@@ -141,9 +149,11 @@ class SaveLoadManager(private val context: Context) {
         serializer.tag("isTwoPlayerMode", state.isTwoPlayerMode.toString())
         serializer.tag("gameStatus", state.gameStatus.name)
         serializer.tag("timeElapsed", state.timeElapsed.toString())
+        serializer.tag("player1Score", state.player1Score.toString())
+        serializer.tag("player2Score", state.player2Score.toString())
+        serializer.tag("dealerScore", state.dealerScore.toString())
         serializer.tag("player1Result", state.player1Result.name)
         serializer.tag("player2Result", state.player2Result.name)
-
         serializer.handToXml("player1Hand", state.player1Hand)
         serializer.handToXml("player2Hand", state.player2Hand)
         serializer.handToXml("dealerHand", state.dealerHand)
@@ -185,6 +195,9 @@ class SaveLoadManager(private val context: Context) {
         var isTwoPlayerMode = false
         var gameStatus = GameStatus.PLAYER_1_TURN
         var timeElapsed = 0L
+        var player1Score = 0
+        var player2Score = 0
+        var dealerScore = 0
         var player1Result = GameResult.PENDING
         var player2Result = GameResult.PENDING
         val player1Hand = mutableListOf<Card>()
@@ -211,6 +224,9 @@ class SaveLoadManager(private val context: Context) {
                         "isTwoPlayerMode" -> isTwoPlayerMode = text.toBoolean()
                         "gameStatus" -> gameStatus = GameStatus.valueOf(text)
                         "timeElapsed" -> timeElapsed = text.toLong()
+                        "player1Score" -> player1Score = text.toIntOrNull() ?: 0
+                        "player2Score" -> player2Score = text.toIntOrNull() ?: 0
+                        "dealerScore" -> dealerScore = text.toIntOrNull() ?: 0
                         "player1Result" -> player1Result = GameResult.valueOf(text)
                         "player2Result" -> player2Result = GameResult.valueOf(text)
                         "move" -> moveHistory.add(text)
@@ -235,7 +251,7 @@ class SaveLoadManager(private val context: Context) {
 
         return GameState(
             isTwoPlayerMode, player1Hand, player2Hand, dealerHand,
-            0,0,0, // Puntuaciones (se recalcularán en el load)
+            player1Score, player2Score, dealerScore, // Puntuaciones (se recalcularán en el load)
             gameStatus, player1Result, player2Result, timeElapsed, moveHistory
         )
     }

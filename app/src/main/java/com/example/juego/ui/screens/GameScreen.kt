@@ -52,13 +52,21 @@ val tableColor = Color(0xFF006400) // Verde oscuro
 fun GameScreen(
     viewModel: GameViewModel,
     isTwoPlayer: Boolean, // ¡NUEVO!
+    isLoadedGame: Boolean,
     onNavigateBack: () -> Unit // ¡NUEVO!
 ) {
     var showSaveDialog by remember { mutableStateOf(false) }
     // 1. Inicia el juego con el modo correcto
-    LaunchedEffect(key1 = isTwoPlayer) {
-        Log.d("GameScreen", "Iniciando juego, es 2 jugadores: $isTwoPlayer")
-        viewModel.initGame(isTwoPlayer)
+    LaunchedEffect(key1 = isTwoPlayer, key2 = isLoadedGame) {
+        if (!isLoadedGame) {
+            // Si NO es una partida cargada, inicia una nueva
+            Log.d("GameScreen", "Iniciando NUEVO juego, es 2 jugadores: $isTwoPlayer")
+            viewModel.initGame(isTwoPlayer)
+        } else {
+            // Si ES una partida cargada, solo informa.
+            // El ViewModel ya tiene el estado.
+            Log.d("GameScreen", "Restaurando partida cargada.")
+        }
     }
 
     val state by viewModel.gameState.collectAsState()

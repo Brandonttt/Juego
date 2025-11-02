@@ -63,13 +63,29 @@ fun AppNavigation(viewModel: GameViewModel) {
 
         // Ruta 2: Pantalla de Juego
         composable(
-            route = "game/{isTwoPlayer}",
-            arguments = listOf(navArgument("isTwoPlayer") { type = NavType.BoolType })
+            route = "game/{isTwoPlayer}", // Recibe (false, true, o "loaded")
+            arguments = listOf(navArgument("isTwoPlayer") { type = NavType.StringType })
         ) { backStackEntry ->
-            val isTwoPlayer = backStackEntry.arguments?.getBoolean("isTwoPlayer") ?: false
+
+            val isTwoPlayerArg = backStackEntry.arguments?.getString("isTwoPlayer")
+
+            // 1. Calcula si es una partida cargada
+            val isLoadedGame = (isTwoPlayerArg == "loaded")
+
+            // 2. Determina el modo de juego
+            val isTwoPlayerBool = if (isLoadedGame) {
+                // Si se carga, toma el valor que ya está en el ViewModel
+                viewModel.gameState.value.isTwoPlayerMode
+            } else {
+                // Si es nueva, toma el valor de la navegación
+                isTwoPlayerArg.toBoolean()
+            }
+
+            // 3. Llama a GameScreen UNA SOLA VEZ, pasando el nuevo parámetro
             GameScreen(
                 viewModel = viewModel,
-                isTwoPlayer = isTwoPlayer,
+                isTwoPlayer = isTwoPlayerBool,
+                isLoadedGame = isLoadedGame, // <-- ¡Aquí está el parámetro que faltaba!
                 onNavigateBack = { navController.popBackStack() }
             )
         }
@@ -103,29 +119,28 @@ fun AppNavigation(viewModel: GameViewModel) {
         // --- Ruta 2 (Modificada) para aceptar partidas cargadas ---
         // (Borra la "Ruta 2" anterior y reemplázala con esta)
         composable(
-            route = "game/{isTwoPlayer}", // Recibe el argumento (false, true, o "loaded")
+            route = "game/{isTwoPlayer}", // Recibe (false, true, o "loaded")
             arguments = listOf(navArgument("isTwoPlayer") { type = NavType.StringType })
         ) { backStackEntry ->
 
             val isTwoPlayerArg = backStackEntry.arguments?.getString("isTwoPlayer")
+            val isLoadedGame = (isTwoPlayerArg == "loaded")
 
-            // Si no es "loaded", es una partida nueva
-            if (isTwoPlayerArg != "loaded") {
-                val isTwoPlayer = isTwoPlayerArg.toBoolean()
-                GameScreen(
-                    viewModel = viewModel,
-                    isTwoPlayer = isTwoPlayer,
-                    onNavigateBack = { navController.popBackStack() }
-                )
+            // Determina el modo de juego
+            val isTwoPlayerBool = if (isLoadedGame) {
+                // Si se carga, toma el valor del ViewModel
+                viewModel.gameState.value.isTwoPlayerMode
             } else {
-                // Es una partida cargada, el ViewModel ya tiene el estado
-                // El 'isTwoPlayer' es solo para satisfacer el Composable
-                GameScreen(
-                    viewModel = viewModel,
-                    isTwoPlayer = viewModel.gameState.value.isTwoPlayerMode, // Usa el estado cargado
-                    onNavigateBack = { navController.popBackStack() }
-                )
+                // Si es nueva, toma el valor de la navegación
+                isTwoPlayerArg.toBoolean()
             }
+
+            GameScreen(
+                viewModel = viewModel,
+                isTwoPlayer = isTwoPlayerBool,
+                isLoadedGame = isLoadedGame, // <-- ¡NUEVO PARÁMETRO AÑADIDO!
+                onNavigateBack = { navController.popBackStack() }
+            )
         }
     }
 }
