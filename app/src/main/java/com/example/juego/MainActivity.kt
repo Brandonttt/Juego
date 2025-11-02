@@ -22,6 +22,11 @@ import com.example.juego.viewmodel.GameViewModel
 import com.example.juego.ui.screens.LoadGameScreen // <-- NUEVO
 import com.example.juego.ui.screens.OptionsScreen
 
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+
 class MainActivity : ComponentActivity() {
 
     // El ViewModel se comparte entre pantallas
@@ -47,6 +52,27 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun AppNavigation(viewModel: GameViewModel) {
     val navController = rememberNavController()
+    val context = LocalContext.current
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+        onResult = { uri ->
+            // El usuario seleccionó un archivo
+            if (uri != null) {
+                viewModel.importGame(uri) { success ->
+                    if (success) {
+                        // Si se cargó bien, navega al juego
+                        navController.navigate("game/loaded") {
+                            popUpTo("menu")
+                        }
+                    } else {
+                        // Si falló, avisa al usuario
+                        Toast.makeText(context, "Error: No se pudo cargar el archivo", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+            // Si uri es null, el usuario canceló. No hacemos nada.
+        }
+    )
 
     NavHost(navController = navController, startDestination = "menu") {
 
@@ -57,7 +83,12 @@ fun AppNavigation(viewModel: GameViewModel) {
                 onTwoPlayerClick = { navController.navigate("game/true") },
                 // --- NUEVAS NAVEGACIONES ---
                 onLoadGameClick = { navController.navigate("load") },
-                onOptionsClick = { navController.navigate("options") }
+                onOptionsClick = { navController.navigate("options") },
+                onImportGameClick = {
+                    // Lanza el selector de archivos del sistema
+                    // El usuario puede elegir cualquier tipo de archivo
+                    importLauncher.launch(arrayOf("*/*"))
+                }
             )
         }
 

@@ -18,7 +18,8 @@ fun MenuScreen(
     onOnePlayerClick: () -> Unit,
     onTwoPlayerClick: () -> Unit,
     onLoadGameClick: () -> Unit, // <-- NUEVO
-    onOptionsClick: () -> Unit  // <-- NUEVO
+    onOptionsClick: () -> Unit,
+    onImportGameClick: () -> Unit// <-- NUEVO
 ) {
     Column(
         modifier = Modifier
@@ -51,6 +52,12 @@ fun MenuScreen(
         Button(onClick = onLoadGameClick, modifier = Modifier.fillMaxWidth().height(50.dp)) {
             Text(text = "Cargar Partida", fontSize = 18.sp)
         }
+
+        Spacer(modifier = Modifier.height(16.dp))
+        Button(onClick = onImportGameClick, modifier = Modifier.fillMaxWidth().height(50.dp)) {
+            Text(text = "Importar Partida", fontSize = 18.sp)
+        }
+
         Spacer(modifier = Modifier.height(16.dp))
         Button(onClick = onOptionsClick, modifier = Modifier.fillMaxWidth().height(50.dp)) {
             Text(text = "Opciones", fontSize = 18.sp)

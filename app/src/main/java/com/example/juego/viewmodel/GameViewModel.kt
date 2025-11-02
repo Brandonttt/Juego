@@ -19,6 +19,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import android.net.Uri // <-- NUEVO
+import com.example.juego.viewmodel.SaveGameMetadata // <-- NUEVO
+import kotlinx.coroutines.flow.StateFlow
 
 class GameViewModel(application: Application) : AndroidViewModel(application) { // <-- CAMBIO
 
@@ -102,13 +105,38 @@ class GameViewModel(application: Application) : AndroidViewModel(application) { 
             }
         }
     }
+    fun importGame(uri: Uri, onResult: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            val loadedState = saveLoadManager.loadGameFromUri(uri)
+            if (loadedState != null) {
+                Log.d("GameViewModel", "Partida importada exitosamente desde URI")
+                _gameState.value = loadedState
+
+                // Restaura las manos internas (copiado de loadGame)
+                isTwoPlayerMode = loadedState.isTwoPlayerMode
+                internalPlayer1Hand = loadedState.player1Hand.toMutableList()
+                internalDealerHand = loadedState.dealerHand.toMutableList()
+                if(isTwoPlayerMode) {
+                    internalPlayer2Hand = loadedState.player2Hand.toMutableList()
+                }
+
+                startTimer() // Reinicia el timer
+                onResult(true) // Éxito
+            } else {
+                Log.e("GameViewModel", "Error al importar desde URI")
+                onResult(false) // Fracaso
+            }
+        }
+    }
 
     // --- NUEVAS FUNCIONES DE GUARDAR/CARGAR ---
 
-    fun saveGame(filename: String) {
+    fun saveGame(filename: String, tag: String) { // <-- AHORA RECIBE EL TAG
         viewModelScope.launch {
             val format = settingsManager.preferredFormatFlow.first()
-            val stateToSave = _gameState.value
+            // Añade la etiqueta al estado antes de guardar
+            val stateToSave = _gameState.value.copy(tag = tag)
+
             val success = saveLoadManager.saveGame(stateToSave, filename, format)
             if (success) {
                 Log.d("GameViewModel", "Partida guardada $filename.${format.extension}")
@@ -142,8 +170,20 @@ class GameViewModel(application: Application) : AndroidViewModel(application) { 
     }
 
     // Expone la lista de partidas guardadas a la UI
-    fun getSavedGames(): List<String> {
-        return saveLoadManager.getSavedGameFiles()
+    fun getSavedGamesMetadata(): List<SaveGameMetadata> {
+        return saveLoadManager.getSavedGamesMetadata()
+    }
+    fun exportGame(filename: String, targetUri: Uri, onResult: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            val content = saveLoadManager.getSavedGameContent(filename)
+            if (content == null) {
+                Log.e("GameViewModel", "No se pudo leer el contenido de $filename para exportar")
+                onResult(false)
+                return@launch
+            }
+            val success = saveLoadManager.exportGame(content, targetUri)
+            onResult(success)
+        }
     }
 
     // Expone la función de guardar preferencias

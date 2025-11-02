@@ -46,6 +46,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextButton
 
+
 val tableColor = Color(0xFF006400) // Verde oscuro
 
 @Composable
@@ -86,8 +87,8 @@ fun GameScreen(
     if (showSaveDialog) {
         SaveGameDialog(
             onDismiss = { showSaveDialog = false },
-            onSave = { filename ->
-                viewModel.saveGame(filename)
+            onSave = { filename, tag ->
+                viewModel.saveGame(filename, tag)
                 showSaveDialog = false
             }
         )
@@ -154,9 +155,10 @@ fun GameScreen(
 @Composable
 fun SaveGameDialog(
     onDismiss: () -> Unit,
-    onSave: (String) -> Unit
+    onSave: (filename: String, tag: String) -> Unit
 ) {
-    var text by remember { mutableStateOf("partida1") }
+    var filename by remember { mutableStateOf("partida1") }
+    var tag by remember { mutableStateOf("") }
 
     Dialog(onDismissRequest = onDismiss) {
         Card(
@@ -167,9 +169,17 @@ fun SaveGameDialog(
                 Text(text = "Guardar Partida", style = MaterialTheme.typography.titleLarge)
                 Spacer(modifier = Modifier.height(16.dp))
                 OutlinedTextField(
-                    value = text,
-                    onValueChange = { text = it },
+                    value = filename,
+                    onValueChange = { filename = it },
                     label = { Text("Nombre del archivo") }
+                )
+                Spacer(modifier = Modifier.height(8.dp)) // <-- Espacio
+
+                // --- NUEVO CAMPO PARA ETIQUETA ---
+                OutlinedTextField(
+                    value = tag,
+                    onValueChange = { tag = it },
+                    label = { Text("Etiqueta (ej. 'Victoria rápida')") }
                 )
                 Spacer(modifier = Modifier.height(16.dp))
                 Row(
@@ -180,8 +190,8 @@ fun SaveGameDialog(
                         Text("Cancelar")
                     }
                     TextButton(
-                        onClick = { onSave(text) },
-                        enabled = text.isNotBlank()
+                        onClick = { onSave(filename, tag) },
+                        enabled = filename.isNotBlank()
                     ) {
                         Text("Guardar")
                     }

@@ -26,5 +26,8 @@ data class GameState(
 
     // --- NUEVOS CAMPOS PARA GUARDAR ---
     val timeElapsed: Long = 0, // En segundos
-    val moveHistory: List<String> = emptyList()
+    val moveHistory: List<String> = emptyList(),
+
+
+    val tag: String = ""
 )
